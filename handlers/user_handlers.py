@@ -34,6 +34,7 @@ class FSMFillForm(StatesGroup):
     fill_name = State()        # Состояние ожидания ввода имени
     fill_car_number = State()         # Состояние ожидания номера машины
     fill_rew = State()      # Состояние ожидания ввода машины
+    searching_number = State()      # Состояние ожидания ввода машины
 
 
 # Этот хэндлер срабатывает на команду /start
@@ -106,7 +107,7 @@ async def process_fill_number(message: Message, state: FSMContext):
 @router.message(StateFilter(FSMFillForm.fill_rew))
 async def process_fill_rew(message: Message, state: FSMContext):
     # Cохраняем описание по ключу "rew"
-    await state.update_data(rew=message.text)
+    await state.update_data(rew=message.text, id=message.from_user.id)
     user_dict[(await state.get_data()).get("number")] = await state.get_data()
     print(user_dict)
     # Завершаем машину состояний
@@ -121,4 +122,29 @@ async def process_fill_rew(message: Message, state: FSMContext):
 async def warning_not_age(message: Message):
     await message.answer(
         text='Mistake!!!')
+
+# Этот хэндлер будет срабатывать на отправку команды /showdata
+# и отправлять в чат данные анкеты, либо сообщение об отсутствии данных
+@router.message(F.text == LEXICON_RU['search_b'], StateFilter(default_state))
+async def process_search_car_by_number(message: Message, state: FSMContext):
+    await message.answer(text='введите номер:')
+    await state.set_state(FSMFillForm.searching_number)
+
+# Этот///////
+@router.message(StateFilter(FSMFillForm.searching_number))
+async def process_name(message: Message, state: FSMContext):
+    # Cохраняем введенное имя в хранилище по ключу "name"
+
+    # Отправляем пользователю анкету, если она есть в "базе данных"
+    if message.text in user_dict:
+        await message.answer(
+            text=f'Имя: {user_dict[message.text]["name"]}\n'
+                    f'номер: {user_dict[message.text]["number"]}\n'
+                    f'описание: {user_dict[message.text]["rew"]}\n'
+                    f'описание: {user_dict[message.text]["id"]}\n')
+    else:
+        # Если анкеты пользователя в базе нет - предлагаем заполнить
+        await message.answer(text='Вы еще не заполняли анкету. '
+                                  'Чтобы приступить - отправьте '
+                                  'команду /fillform')
 
