@@ -2,6 +2,8 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
+from aioredis import Redis
+
 from data.config_data import Config, load_config
 from handlers import other_handlers, user_handlers
 
@@ -23,6 +25,7 @@ async def main():
     # Загружаем конфиг в переменную config
     config: Config = load_config()
 
+
     # Инициализируем бот и диспетчер
     bot = Bot(token=config.tg_bot.token,
               parse_mode='HTML')
@@ -39,5 +42,3 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
-
-#https://t.me/serverbotlogbot
