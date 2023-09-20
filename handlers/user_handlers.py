@@ -10,6 +10,14 @@ from aiogram.fsm.storage.redis import RedisStorage, Redis
 import requests
 from data.config_data import Config, load_config
 
+import asyncio
+from data import config_data
+from db.car_bot import db
+from db import quick_commands as commands
+
+# Создаем обработчик для записи данных в базу данных postgresql
+async def db_test():
+    await db.set_bind(config_data.POSTGRES_URL)
 
 def replace_and_apper_number(number: str) -> str:
     return number.replace(' ', '').upper()
@@ -43,7 +51,7 @@ class FSMFillForm(StatesGroup):
 # Этот хэндлер срабатывает на команду /start
 @router.message(CommandStart(), StateFilter(default_state))
 async def process_start_command(message: Message):
-    await message.answer(text=LEXICON_RU['/start'], reply_markup=reg_search_send_kb)
+    await message.answer(text=LEXICON_RU['start'], reply_markup=reg_search_send_kb)
 
 
 # Этот хэндлер срабатывает на команду /help
@@ -108,8 +116,10 @@ async def process_fill_number(message: Message, state: FSMContext):
 @router.message(StateFilter(FSMFillForm.fill_rew))
 async def process_fill_rew(message: Message, state: FSMContext):
     # Cохраняем описание по ключу "rew"
-    await state.update_data(rew=message.text, id=message.chat.id)
-    user_dict[(await state.get_data()).get("number")] = await state.get_data()
+    # await state.update_data(rew=message.text, id=message.chat.id)
+    await db_test()
+    await commands.add_number((await state.get_data()).get("name"), (await state.get_data()).get("number"), message.text, message.chat.id)
+    # user_dict[(await state.get_data()).get("number")] = await state.get_data()
     # Завершаем машину состояний
     await state.clear()
     # Устанавливаем состояние нейтральное
@@ -119,7 +129,7 @@ async def process_fill_rew(message: Message, state: FSMContext):
 # Этот хэндлер будет срабатывать, если во время ввода описания машины если
 # будет введено что-то некорректное
 @router.message(StateFilter(FSMFillForm.fill_rew))
-async def warning_not_age(message: Message):
+async def warning_bad_rew(message: Message):
     await message.answer(
         text=LEXICON_RU['mistake_2'])
 
@@ -136,12 +146,19 @@ async def process_name(message: Message, state: FSMContext):
 
     # Отправляем пользователю анкету, если она есть в "базе данных"
     data = replace_and_apper_number(message.text)
-    if data in user_dict:
-        await message.answer(
-            text=f'Имя: {user_dict[data]["name"]}\n'
-                 f'номер: {user_dict[data]["number"]}\n'
-                 f'описание: {user_dict[data]["rew"]}\n'
-                 f'описание: {user_dict[data]["id"]}\n', reply_markup=reg_search_send_kb)
+    print(data)
+    await db_test()
+    car_data = await commands.select_car_number(data)
+    if car_data is not None:
+        print(car_data.name)
+        await message.answer(text=f"Мошина с номером {car_data.number} принадлежит {car_data.name} описание машины {car_data.rew}. ")
+
+    # if data in user_dict:
+    #     await message.answer(
+    #         text=f'Имя: {user_dict[data]["name"]}\n'
+    #              f'номер: {user_dict[data]["number"]}\n'
+    #              f'описание: {user_dict[data]["rew"]}\n'
+    #              f'id: {user_dict[data]["id"]}\n', reply_markup=reg_search_send_kb)
         await state.clear()
     else:
         # Если анкеты пользователя в базе нет - предлагаем заполнить
