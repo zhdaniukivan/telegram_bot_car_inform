@@ -4,8 +4,8 @@ from typing import List
 from aiogram import Dispatcher
 from data import config_data
 
-
 db = Gino()
+
 
 class BaseModel(db.Model):
     __abstract__ = True
@@ -22,10 +22,6 @@ class BaseModel(db.Model):
         return f"<{model} {values_str}>"
 
 
-
 async def on_start_up(dispatcher: Dispatcher):
     print('установка связи с Postgresql')
     await db.set_bind(config_data.POSTGRES_URL)
-
-
-

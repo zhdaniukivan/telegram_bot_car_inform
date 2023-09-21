@@ -4,6 +4,7 @@ from data import config_data
 from db.car_bot import db
 from db import quick_commands as commands
 
+
 async def db_test():
     await db.set_bind(config_data.POSTGRES_URL)
     await db.gino.drop_all()
