@@ -1,14 +1,27 @@
-from aiogram.fsm.state import State
+import aiogram.fsm.state
+import requests
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import default_state, StatesGroup
 from aiogram.types import Message
+
+from data import config_data
+from data.config_data import Config, load_config
+from db import quick_commands as commands
+from db.car_bot import db
 from keyboards.keyboard_ru import reg_search_send_kb
 from lexicon.lexicon_ru import LEXICON_RU
-from aiogram.fsm.storage.redis import RedisStorage, Redis
-import requests
-from data.config_data import Config, load_config
+
+
+# Создаем обработчик для записи данных в базу данных postgresql
+async def db_test():
+    await db.set_bind(config_data.POSTGRES_URL)
+
+
+# отключаемся от бд
+async def stop_bd():
+    await db.pop_bind().close()
 
 
 def replace_and_apper_number(number: str) -> str:
@@ -18,32 +31,28 @@ def replace_and_apper_number(number: str) -> str:
 # Создаем глобальную переменную для передачи данных из одной фукции в другую
 id_to_message = None
 
-# Инициализируем Redis
-redis = Redis(host='localhost')
-
-storage = RedisStorage(redis=redis)
-
 router = Router()
 
-# Создаем "базу данных" пользователей
+# Создаем переменную для хранения данных до записи в бд
 user_dict: dict[str, dict[str, str, str]] = {}
+
 
 class FSMFillForm(StatesGroup):
     # Создаем экземпляры класса State, последовательно
     # перечисляя возможные состояния, в которых будет находиться
     # бот в разные моменты взаимодейтсвия с пользователем
-    fill_name = State()        # Состояние ожидания ввода имени
-    fill_car_number = State()         # Состояние ожидания номера машины
-    fill_rew = State()      # Состояние ожидания опания машины
-    searching_number = State()      # Состояние ожидания номера для поиска
-    sent_message = State()      # Состояние вода номера для отправки сообщения
-    await_text_message = State()      # Состояние ожидания ввода текста сообщения
+    fill_name = aiogram.fsm.state.State()  # Состояние ожидания ввода имени
+    fill_car_number = aiogram.fsm.state.State()  # Состояние ожидания номера машины
+    fill_rew = aiogram.fsm.state.State()  # Состояние ожидания опания машины
+    searching_number = aiogram.fsm.state.State()  # Состояние ожидания номера для поиска
+    sent_message = aiogram.fsm.state.State()  # Состояние вода номера для отправки сообщения
+    await_text_message = aiogram.fsm.state.State()  # Состояние ожидания ввода текста сообщения
 
 
 # Этот хэндлер срабатывает на команду /start
 @router.message(CommandStart(), StateFilter(default_state))
 async def process_start_command(message: Message):
-    await message.answer(text=LEXICON_RU['/start'], reply_markup=reg_search_send_kb)
+    await message.answer(text=LEXICON_RU['start'], reply_markup=reg_search_send_kb)
 
 
 # Этот хэндлер срабатывает на команду /help
@@ -67,6 +76,7 @@ async def process_cancel_command_state(message: Message, state: FSMContext):
     # Сбрасываем состояние и очищаем данные, полученные внутри состояний
     await state.clear()
 
+
 # Этот хэндлер срабатывает на регистрацию пользователя
 @router.message(F.text == LEXICON_RU['reg_b'], StateFilter(default_state))
 async def process_reg(message: Message, state: FSMContext):
@@ -85,13 +95,14 @@ async def process_name(message: Message, state: FSMContext):
 
 
 # Этот хэндлер будет срабатывать, если во время ввода имени
-# будет введено что-то некорректное
+# будет введено что-то некорректное(только буквы)
 @router.message(StateFilter(FSMFillForm.fill_name))
 async def warning_not_name(message: Message):
     await message.answer(text=LEXICON_RU['name_mistake'])
 
+
 # Этот хэндлер будет срабатывать, если введен корректный номер авто
-# и переводить в состояние описания ато
+# и переводить в состояние описания ато(только 8 цифр)
 @router.message(StateFilter(FSMFillForm.fill_car_number))
 async def process_fill_number(message: Message, state: FSMContext):
     data = replace_and_apper_number(message.text)
@@ -105,23 +116,29 @@ async def process_fill_number(message: Message, state: FSMContext):
         await message.answer(text=LEXICON_RU['mistake_3'])
 
 
+# Этот хэндлер сохраняет данные о пользователе в бд
 @router.message(StateFilter(FSMFillForm.fill_rew))
 async def process_fill_rew(message: Message, state: FSMContext):
-    # Cохраняем описание по ключу "rew"
-    await state.update_data(rew=message.text, id=message.chat.id)
-    user_dict[(await state.get_data()).get("number")] = await state.get_data()
+    # подключаемся к бд
+    await db_test()
+    # сохраняем данные в бд
+    await commands.add_number((await state.get_data()).get("name"), (await state.get_data()).get("number"),
+                              message.text, message.chat.id)
     # Завершаем машину состояний
     await state.clear()
     # Устанавливаем состояние нейтральное
     await message.answer(text=LEXICON_RU['reg_4'], reply_markup=reg_search_send_kb)
+    # отключаемся от бд
+    await stop_bd()
 
 
 # Этот хэндлер будет срабатывать, если во время ввода описания машины если
 # будет введено что-то некорректное
 @router.message(StateFilter(FSMFillForm.fill_rew))
-async def warning_not_age(message: Message):
+async def warning_bad_rew(message: Message):
     await message.answer(
         text=LEXICON_RU['mistake_2'])
+
 
 # Этот хэндлер будет срабатывать на отправку команды /search_b
 # и отправлять в чат данные о пользовелеле либо сообщение об отсутствии данных
@@ -130,22 +147,23 @@ async def process_search_car_by_number(message: Message, state: FSMContext):
     await message.answer(text=LEXICON_RU['send'])
     await state.set_state(FSMFillForm.searching_number)
 
+
 # Этот хэндлер будет выводить информацио авто по номеру.
 @router.message(StateFilter(FSMFillForm.searching_number))
 async def process_name(message: Message, state: FSMContext):
-
-    # Отправляем пользователю анкету, если она есть в "базе данных"
     data = replace_and_apper_number(message.text)
-    if data in user_dict:
+    await db_test()
+    car_data = await commands.select_car_number(data)
+    if car_data is not None:
+        # Отправляем пользователю анкету, если она есть в "базе данных"
         await message.answer(
-            text=f'Имя: {user_dict[data]["name"]}\n'
-                 f'номер: {user_dict[data]["number"]}\n'
-                 f'описание: {user_dict[data]["rew"]}\n'
-                 f'описание: {user_dict[data]["id"]}\n', reply_markup=reg_search_send_kb)
+            text=f"Мошина с номером {car_data.number} принадлежит {car_data.name} описание машины {car_data.rew}. ")
         await state.clear()
+        await stop_bd()
     else:
         # Если анкеты пользователя в базе нет - предлагаем заполнить
         await message.answer(text=LEXICON_RU['not_found'])
+        await stop_bd()
 
 
 # Этот хэндлер срабатывает на кнопку отправить сообщение
@@ -161,32 +179,33 @@ async def process_name(message: Message, state: FSMContext):
     global id_to_message
     # находим владельца по номеру:
     data = replace_and_apper_number(message.text)
-    if data in user_dict:
-        await message.answer(
-            text=f'Имя: {user_dict[data]["name"]}\n'
-                 f'номер: {user_dict[data]["number"]}\n'
-                 f'описание: {user_dict[data]["rew"]}\n'
-                 f'id: {user_dict[data]["id"]}\n')
-        id_to_message = user_dict[data]["id"]
-        await message.answer(text=f'Машина с номером{user_dict[data]["number"]} и описанием'
-                                  f' {user_dict[data]["rew"]} найдена, введите сообщение для отправки ее владельцу:')
+    await db_test()
+    car_data = await commands.select_car_number(data)
+    if car_data is not None:
+        # Отправляем пользователю анкету, если она есть в "базе данных"
+        await message.answer(text=f"Машина с номером {car_data.number} найдена и принадлежит {car_data.name} краткое "
+                                  f"описание машины {car_data.rew}. Введите текс вашего сообщения для пересылки пользователю: ")
+
+        id_to_message = car_data.id_to_message
+        await stop_bd()
         # Устанавливаем состояние ожидания ввода сообщения автовладельцу
         await state.set_state(FSMFillForm.await_text_message)
     else:
         await message.answer(text=LEXICON_RU['not_found'], reply_markup=reg_search_send_kb)
         await state.clear()
+        await stop_bd()
+
 
 # получаем доступ к токену для отправки сообщений
 config: Config = load_config()
 
+
 # Этот хэндлер срабатывает на ввод сообщения автовладельцу и пересылает сообщение
 @router.message(StateFilter(FSMFillForm.await_text_message))
-async def process_send_message(message:Message, state: FSMContext):
+async def process_send_message(message: Message, state: FSMContext):
     global id_to_message
     if message.text:
         url = f'https://api.telegram.org/bot{config.tg_bot.token}/sendMessage?chat_id={id_to_message}&text={message.text}'
         response = requests.get(url)
         await message.answer(text=LEXICON_RU['message_poisoned'], reply_markup=reg_search_send_kb)
         await state.clear()
-
-

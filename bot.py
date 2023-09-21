@@ -2,7 +2,8 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
-from aioredis import Redis
+from aiogram.fsm.storage.memory import MemoryStorage
+
 
 from data.config_data import Config, load_config
 from handlers import other_handlers, user_handlers
@@ -29,7 +30,7 @@ async def main():
     # Инициализируем бот и диспетчер
     bot = Bot(token=config.tg_bot.token,
               parse_mode='HTML')
-    dp = Dispatcher()
+    dp = Dispatcher(storage=MemoryStorage())
 
     # Регистриуем роутеры в диспетчере
     dp.include_router(user_handlers.router)
